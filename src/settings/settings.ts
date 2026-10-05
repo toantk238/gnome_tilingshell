@@ -115,6 +115,7 @@ export default class Settings {
     static KEY_TILE_PREVIEW_ANIMATION_TIME = 'tile-preview-animation-time';
     static KEY_SETTING_LAYOUTS_JSON = 'layouts-json';
     static KEY_SETTING_SELECTED_LAYOUTS = 'selected-layouts';
+    static KEY_SETTING_SELECTED_LAYOUTS_PER_MONITOR_SETUP = 'selected-layouts-per-monitor-setup';
     static KEY_WINDOW_BORDER_WIDTH = 'window-border-width';
     static KEY_ENABLE_SMART_WINDOW_BORDER_RADIUS = 'enable-smart-window-border-radius';
     static KEY_QUARTER_TILING_THRESHOLD = 'quarter-tiling-threshold';
@@ -710,6 +711,31 @@ export default class Settings {
         this._settings?.set_value(
             Settings.KEY_SETTING_SELECTED_LAYOUTS,
             result,
+        );
+    }
+
+    static get_selected_layouts_per_monitor_setup(): Record<
+        string,
+        string[][]
+    > {
+        try {
+            const parsed = JSON.parse(
+                this._settings?.get_string(
+                    this.KEY_SETTING_SELECTED_LAYOUTS_PER_MONITOR_SETUP,
+                ) || '{}',
+            );
+            return parsed && typeof parsed === 'object' ? parsed : {};
+        } catch (_unused) {
+            return {};
+        }
+    }
+
+    static save_selected_layouts_per_monitor_setup(
+        value: Record<string, string[][]>,
+    ) {
+        this._settings?.set_string(
+            this.KEY_SETTING_SELECTED_LAYOUTS_PER_MONITOR_SETUP,
+            JSON.stringify(value),
         );
     }
 
