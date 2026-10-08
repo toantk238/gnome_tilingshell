@@ -751,6 +751,13 @@ export default class TilingShellExtension extends Extension {
     private _isFractionalScalingEnabled(
         _mutterSettings: Gio.Settings,
     ): boolean {
+        // GNOME 51+ dropped the experimental-features key: monitor
+        // framebuffer scaling is no longer experimental and always enabled
+        if (
+            !_mutterSettings.settings_schema.has_key('experimental-features')
+        )
+            return true;
+
         return (
             _mutterSettings
                 .get_strv('experimental-features')
