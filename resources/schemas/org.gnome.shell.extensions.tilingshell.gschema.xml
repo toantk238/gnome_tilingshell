@@ -67,6 +67,11 @@
             <summary>Selected layouts</summary>
             <description>Each monitor's active layout used by the monitor tiling manager.</description>
         </key>
+        <key name="selected-layouts-per-monitor-setup" type="s">
+            <default>'{}'</default>
+            <summary>Selected layouts per monitor setup</summary>
+            <description>JSON object mapping each known monitor setup to its selected layouts, restored when that monitor setup comes back.</description>
+        </key>
         <key name="restore-window-original-size" type="b">
             <default>true</default>
             <summary>Restore window size</summary>

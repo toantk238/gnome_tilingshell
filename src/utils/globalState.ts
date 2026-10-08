@@ -41,6 +41,10 @@ export default class GlobalState extends GObject.Object {
     // if workspaces are reordered, we use this map to know which layouts where selected
     // to each workspace and we save the new ordering in the settings
     private _selected_layouts: Map<Meta.Workspace, string[]>; // used to handle reordering of workspaces
+    // the monitor setup the selected layouts were last validated for. Used to
+    // restore the layouts of a monitor setup when it comes back (e.g. after a
+    // remote desktop session added/removed a virtual monitor)
+    private _monitorSetup: string | undefined;
 
     static get(): GlobalState {
         if (!this._instance) this._instance = new GlobalState();
@@ -63,6 +67,7 @@ export default class GlobalState extends GObject.Object {
         this._layouts = Settings.get_layouts_json();
         this._tilePreviewAnimationTime = 100;
         this._selected_layouts = new Map();
+        this._monitorSetup = undefined;
         this.validate_selected_layouts();
 
         Settings.bind(
@@ -109,8 +114,17 @@ export default class GlobalState extends GObject.Object {
 
                     this._selected_layouts.set(ws, monitors_layouts);
                 }
+
+                this._rememberSelectedLayoutsOfMonitorSetup();
             },
         );
+
+        // the monitors may change without changing their number (e.g. a
+        // physical monitor replaced by a virtual one), so check the setup here
+        this._signals.connect(Main.layoutManager, 'monitors-changed', () => {
+            if (this._monitorSetup !== this._computeMonitorSetup())
+                this.validate_selected_layouts();
+        });
 
         this._signals.connect(
             global.workspaceManager,
@@ -199,13 +213,37 @@ export default class GlobalState extends GObject.Object {
 
     public validate_selected_layouts() {
         const n_monitors = Main.layoutManager.monitors.length;
-        const old_selected_layouts = Settings.get_selected_layouts();
+        const current_selected_layouts = Settings.get_selected_layouts();
+        let old_selected_layouts = current_selected_layouts;
+
+        // if the monitor setup changed, or the selected layouts were saved for
+        // a different number of monitors, restore what was selected the last
+        // time this monitor setup was used
+        const monitorSetup = this._computeMonitorSetup();
+        const setupChanged =
+            this._monitorSetup !== undefined &&
+            this._monitorSetup !== monitorSetup;
+        const sizeMismatch = current_selected_layouts.some(
+            (monitors_layouts) => monitors_layouts.length !== n_monitors,
+        );
+        const remembered =
+            Settings.get_selected_layouts_per_monitor_setup()[monitorSetup];
+        if (Array.isArray(remembered) && (setupChanged || sizeMismatch)) {
+            debug(`restoring selected layouts of monitor setup ${monitorSetup}`);
+            old_selected_layouts = remembered.map((monitors_layouts, i) =>
+                Array.isArray(monitors_layouts)
+                    ? [...monitors_layouts]
+                    : (current_selected_layouts[i] ?? []),
+            );
+        }
+        this._monitorSetup = monitorSetup;
+
         for (let i = 0; i < global.workspaceManager.get_n_workspaces(); i++) {
             const ws = global.workspaceManager.get_workspace_by_index(i);
             if (!ws) continue;
 
             const monitors_layouts =
-                i < old_selected_layouts.length ? old_selected_layouts[i] : [];
+                old_selected_layouts[i] ?? current_selected_layouts[i] ?? [];
             while (monitors_layouts.length < n_monitors)
                 monitors_layouts.push(this._layouts[0].id);
             while (monitors_layouts.length > n_monitors) monitors_layouts.pop();
@@ -223,6 +261,7 @@ export default class GlobalState extends GObject.Object {
         }
 
         this._save_selected_layouts();
+        this._rememberSelectedLayoutsOfMonitorSetup();
     }
 
     private _save_selected_layouts() {
@@ -237,6 +276,54 @@ export default class GlobalState extends GObject.Object {
         }
 
         Settings.save_selected_layouts(to_be_saved);
+    }
+
+    // identifies the current monitor setup, by connector names (e.g. "DP-1|HDMI-2")
+    // in monitor index order, falling back to the monitors geometry
+    private _computeMonitorSetup(): string {
+        try {
+            const logicalMonitors = global.backend
+                .get_monitor_manager()
+                .get_logical_monitors?.();
+            if (logicalMonitors && logicalMonitors.length > 0) {
+                return [...logicalMonitors]
+                    .sort((a, b) => a.get_number() - b.get_number())
+                    .map((logicalMonitor) =>
+                        logicalMonitor
+                            .get_monitors()
+                            .map((monitor) => monitor.get_connector())
+                            .join('+'),
+                    )
+                    .join('|');
+            }
+        } catch (e) {
+            debug('cannot read the monitor connectors', e);
+        }
+
+        return Main.layoutManager.monitors
+            .map((m) => `${m.x},${m.y},${m.width}x${m.height}`)
+            .join('|');
+    }
+
+    private _rememberSelectedLayoutsOfMonitorSetup() {
+        // the selected layouts belong to the monitor setup they were validated for
+        const monitorSetup = this._computeMonitorSetup();
+        if (this._monitorSetup !== monitorSetup) return;
+
+        const selected = Settings.get_selected_layouts();
+        const n_monitors = Main.layoutManager.monitors.length;
+        if (
+            selected.length === 0 ||
+            selected.some((monitors_layouts) => monitors_layouts.length !== n_monitors)
+        )
+            return;
+
+        const perSetup = Settings.get_selected_layouts_per_monitor_setup();
+        if (JSON.stringify(perSetup[monitorSetup]) === JSON.stringify(selected))
+            return;
+
+        perSetup[monitorSetup] = selected;
+        Settings.save_selected_layouts_per_monitor_setup(perSetup);
     }
 
     get layouts(): Layout[] {
